@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Socket.IO Test</title>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>Socket.IO Test</h1>
+  <script>
+    const socket = io("http://localhost:3000");
+
+    socket.on("connect", () => {
+      console.log("Подключено, ID:", socket.id);
+      document.body.insertAdjacentHTML("beforeend", `<p>Подключено, ID: ${socket.id}</p>`);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("Отключено");
+      document.body.insertAdjacentHTML("beforeend", `<p>Отключено</p>`);
+    });
+  </script>
+</body>
+</html>
