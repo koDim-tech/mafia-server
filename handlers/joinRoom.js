@@ -1,7 +1,5 @@
 import { emitSystemMessage } from "../utils/chatUtils.js";
 
-
-
 export async function handleJoinRoom(
   socket,
   io,
@@ -36,24 +34,29 @@ export async function handleJoinRoom(
       isHost,
       alive: true,
       role: null,
+      ready: false, // <--- NEW: всегда добавляй ready!
     });
   } else {
     existing.id = socket.id;
     existing.name = name;
     isHost = existing.isHost;
+    // ready НЕ сбрасываем, оставляем как есть!
+    // Если хочешь сбрасывать ready после реконнекта — раскомментируй:
+    // existing.ready = false;
   }
 
   await client.set(`room:${room}`, JSON.stringify(roomData));
   socket.join(room);
   socket.data = { room, playerId };
 
-  // Отправляем всем roomData (без ролей)
+  // Отправляем всем roomData (ТЕПЕРЬ добавляй ready)
   io.to(room).emit("roomData", {
     players: roomData.players.map((p) => ({
       name: p.name,
       playerId: p.playerId,
       isHost: p.isHost,
       alive: p.alive,
+      ready: !!p.ready, // <--- NEW: ready для UI
     })),
     phase: roomData.phase,
   });
@@ -65,6 +68,7 @@ export async function handleJoinRoom(
       playerId: p.playerId,
       isHost: p.isHost,
       alive: p.alive,
+      ready: !!p.ready, // <--- NEW: ready для UI
     })),
     gameStarted: roomData.phase !== "lobby",
   });
@@ -86,6 +90,7 @@ export async function handleJoinRoom(
         playerId: p.playerId,
         isHost: p.isHost,
         alive: p.alive,
+        ready: !!p.ready, // <--- NEW: ready для UI (можно убрать если не нужен в игре)
         // role: p.role, // только если нужно для мафии/админа
       })),
     });

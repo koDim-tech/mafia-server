@@ -8,15 +8,30 @@ export async function handleStartGame(socket, io, client) {
 
   let raw = await client.get(`room:${room}`);
   let roomData = raw ? JSON.parse(raw) : null;
-  console.log('СОСТАВ roomData.players:', JSON.stringify(roomData.players, null, 2));
 
+  // Первая защита!
+  if (!roomData || roomData.phase !== 'lobby') {
+    console.log('[WARN] Не найдено roomData или неверная фаза для старта', { roomData });
+    return;
+  }
+
+  // Дополнительная защита!
+  if (!Array.isArray(roomData.players) || roomData.players.length === 0) {
+    socket.emit('errorMessage', { text: 'Нет игроков для старта' });
+    return;
+  }
+
+  // Теперь можно безопасно логировать игроков!
+  console.log('СОСТАВ roomData.players:', JSON.stringify(roomData.players, null, 2));
   console.log('Старт игры:', roomData.players.length, 'игроков');
   console.log('Фаза:', roomData?.phase);
-  if (!roomData || roomData.phase !== 'lobby') return;
 
-  // Минимум игроков
-  if (roomData.players.length < 4) {
-    socket.emit('errorMessage', { text: 'Недостаточно игроков для старта (минимум 4)' });
+  // Минимум игроков + все готовы
+  const allReady = roomData.players.length >= 4 &&
+    roomData.players.every(p => p.ready);
+
+  if (!allReady) {
+    socket.emit('errorMessage', { text: 'Не все игроки готовы или слишком мало игроков' });
     return;
   }
 
@@ -48,27 +63,24 @@ export async function handleStartGame(socket, io, client) {
   // Системное сообщение
   await emitSystemMessage(io, client, room, 'Игра началась! Роли назначены.');
 
-
   console.log('SEND phaseChanged:', {
-  phase: roomData.phase,
-  players: roomData.players.map(p => ({
-    name: p.name,
-    playerId: p.playerId,
-    id: p.id,
-    isHost: p.isHost,
-    alive: p.alive,
-    role: p.role,
-  }))
-});
-
-
+    phase: roomData.phase,
+    players: roomData.players.map(p => ({
+      name: p.name,
+      playerId: p.playerId,
+      id: p.id,
+      isHost: p.isHost,
+      alive: p.alive,
+      role: p.role,
+    }))
+  });
 
   // Групповой emit — ВСЕ публичные данные (!!! теперь с playerId !!!)
   io.to(room).emit('phaseChanged', {
     phase: roomData.phase,
     players: roomData.players.map(p => ({
       name: p.name,
-      playerId: p.playerId,   // ОБЯЗАТЕЛЬНО!
+      playerId: p.playerId,
       isHost: p.isHost,
       alive: p.alive,
       // role: p.role // добавлять только если ты хочешь чтобы все знали роли

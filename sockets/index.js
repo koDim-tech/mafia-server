@@ -9,6 +9,8 @@ import { handleEndGame } from '../handlers/endGame.js';
 import { handleDisconnect } from '../handlers/disconnect.js';
 import { handleLeaveRoom } from '../handlers/leaveRoom.js';
 import { handlePlayerMessage } from '../handlers/playerMessage.js';
+import { handleSetReady } from '../handlers/setReady.js';
+import { handleRestartGame } from '../handlers/restartGame.js';
 
 export function registerSocketHandlers(server) {
 const io = new Server(server, {
@@ -26,6 +28,9 @@ const io = new Server(server, {
     socket.on('leaveRoom', () => handleLeaveRoom(socket, io, client));
     socket.on('playerMessage', (payload) => handlePlayerMessage(socket, io, client, payload));
     socket.on('disconnect', () => handleDisconnect(socket, io, client));
+
+    socket.on('setReady', (payload) => handleSetReady(socket, io, client, payload));
+  socket.on('restartGame', () => handleRestartGame(socket, io, client));
   });
 
   console.log('Socket.io handlers registered');
