@@ -1,4 +1,7 @@
 export const checkWinCondition = async (io, client, room, roomData) => {
+  // Защита!
+  if (!roomData || !Array.isArray(roomData.players)) return false;
+
   const mafia = roomData.players.filter(p => p.role === 'Мафия');
   const civilians = roomData.players.filter(p => p.role !== 'Мафия');
 
@@ -17,12 +20,11 @@ export const checkWinCondition = async (io, client, room, roomData) => {
     await emitSystemMessage(io, client, room, message);
     io.to(room).emit('gameEnded', { winner });
 
-    // Запускаем таймер очистки через 1 минуту
     setTimeout(async () => {
       await client.del(`room:${room}`);
       await client.del(`chat:${room}`);
       io.to(room).emit('roomClosed');
-    }, 60_000); // 60 секунд
+    }, 60_000);
     return true;
   }
 

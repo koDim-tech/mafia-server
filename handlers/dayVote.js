@@ -1,56 +1,81 @@
-import { checkWinCondition } from '../services/checkWinCondition.js';
-import { emitSystemMessage } from '../utils/chatUtils.js';
+import { checkWinCondition } from "../services/checkWinCondition.js";
+import { emitSystemMessage } from "../utils/chatUtils.js";
 
 export async function handleDayVote(socket, io, client, { targetId }) {
-  const { room, playerId } = socket.data || {};
+  const { room, playerId } = socket.data;
   if (!room || !playerId) return;
-  let raw = await client.get(`room:${room}`);
+
+  const raw = await client.get(`room:${room}`);
   let roomData = raw ? JSON.parse(raw) : null;
-  if (!roomData || roomData.phase !== 'День') return;
+
+  if (!roomData || roomData.phase !== "День") return;
+
+  // Текущий игрок
+  const voter = roomData.players.find((p) => p.playerId === playerId);
+  if (!voter || !voter.alive) return;
 
   roomData.dayVotes = roomData.dayVotes || {};
-  roomData.dayVotes[playerId] = targetId;
-  const voter = roomData.players.find(p => p.playerId === playerId);
-  const target = roomData.players.find(p => p.playerId === targetId);
-  if (voter && target) {
-    await emitSystemMessage(io, client, room, `${voter.name} проголосовал за ${target.name}`);
+
+  // === ЗАЩИТА: уже голосовал (по playerId) ===
+  if (roomData.dayVotes[playerId]) {
+    socket.emit("errorMessage", { text: "Вы уже голосовали!" });
+    return;
   }
-  await client.set(`room:${room}`, JSON.stringify(roomData));
 
-  const aliveCount = roomData.players.length;
-  const votedCount = Object.keys(roomData.dayVotes).length;
-  if (votedCount >= aliveCount) {
-    const counts = {};
-    Object.values(roomData.dayVotes).forEach(id => {
-      counts[id] = (counts[id] || 0) + 1;
-    });
+  // Сохраняем голос
+  roomData.dayVotes[playerId] = targetId;
 
-    const entries = Object.entries(counts);
-    const max = Math.max(...entries.map(e => e[1]));
-    const mostVoted = entries.filter(([_, count]) => count === max);
+  // === ВЫВОД В ЧАТ КАЖДОГО ГОЛОСА ===
+  const target = roomData.players.find((p) => p.playerId === targetId);
+  if (target) {
+    await emitSystemMessage(io, client, room, `*${voter.name}* проголосовал за *${target.name}*`);
+  }
 
-    delete roomData.dayVotes;
+  // Проверяем только живых!
+  const livingPlayers = roomData.players.filter((p) => p.alive);
+  const allVoted = livingPlayers.every((pl) => roomData.dayVotes[pl.playerId]);
 
-    if (mostVoted.length > 1) {
-      await emitSystemMessage(io, client, room, 'Ничья — никто не был казнен.');
-      roomData.phase = 'Ночь';
-      await client.set(`room:${room}`, JSON.stringify(roomData));
-      io.to(room).emit('phaseChange', 'Ночь');
-      await emitSystemMessage(io, client, room, 'Город засыпает...');
-      return;
+  if (allVoted) {
+    // Подсчёт результатов
+    const votes = Object.values(roomData.dayVotes);
+    const voteResult = votes.reduce((acc, curr) => {
+      acc[curr] = (acc[curr] || 0) + 1;
+      return acc;
+    }, {});
+
+    // Находим жертву по большинству голосов
+    let victimId = Object.entries(voteResult).sort((a, b) => b[1] - a[1])[0][0];
+    let victim = roomData.players.find((p) => p.playerId === victimId);
+
+    if (victim && victim.alive) {
+      victim.alive = false;
+      roomData.lastKilled = victim.name;
+      await emitSystemMessage(io, client, room, `${victim.name} был изгнан из города!`);
     }
 
-    const eliminatedId = mostVoted[0][0];
-    roomData.players = roomData.players.filter(p => p.playerId !== eliminatedId);
-    await client.set(`room:${room}`, JSON.stringify(roomData));
-    io.to(room).emit('playerEliminated', eliminatedId);
+    // --- Проверка победы ---
+    const win = await checkWinCondition(io, client, room, roomData);
+    if (win) return; // Если победа, ничего больше не делаем
 
-    const gameEnded = await checkWinCondition(io, client, room, roomData);
-    if (gameEnded) return;
+    // Меняем фазу на "Ночь"
+    roomData.phase = "Ночь";
+    roomData.dayVotes = {};
 
-    roomData.phase = 'Ночь';
     await client.set(`room:${room}`, JSON.stringify(roomData));
-    io.to(room).emit('phaseChange', 'Ночь');
-    await emitSystemMessage(io, client, room, 'Город засыпает...');
+
+    io.to(room).emit("phaseChanged", {
+      phase: roomData.phase,
+      players: roomData.players.map((p) => ({
+        name: p.name,
+        playerId: p.playerId,
+        isHost: p.isHost,
+        alive: p.alive,
+      })),
+    });
+  } else {
+    // Подтверждение игроку что голос учтен
+    socket.emit("voteReceived", { phase: "День", votedFor: targetId });
+    // --- Обновляем roomData после каждого голоса ---
+    await client.set(`room:${room}`, JSON.stringify(roomData));
   }
 }
