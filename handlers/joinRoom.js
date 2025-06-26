@@ -9,11 +9,10 @@ export async function handleJoinRoom(
   console.log(`Player ${name} (${playerId}) is trying to join room: ${room}`);
 
   let raw = await client.get(`room:${room}`);
-  let roomData = raw
-    ? JSON.parse(raw)
-    : { players: [], phase: "lobby", gameStarted: false };
+let roomData = raw
+  ? JSON.parse(raw)
+  : { players: [], phase: "lobby", gameStarted: false, name: room, maxPlayers: 10 };
 
-  console.log('[DEBUG] После реконнекта', room, 'dayVotes:', roomData.dayVotes);
 
   let existing = roomData.players.find((p) => p.playerId === playerId);
   let isHost = false;
