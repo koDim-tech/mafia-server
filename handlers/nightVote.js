@@ -7,14 +7,14 @@ export async function handleNightVote(socket, io, client, { targetId }) {
 
   const raw = await client.get(`room:${room}`);
   let roomData = raw ? JSON.parse(raw) : null;
-  if (!roomData || roomData.phase !== "Ночь") return;
+  if (!roomData || roomData.phase !== "night") return;
 
   const voter = roomData.players.find((p) => p.playerId === playerId);
   if (!voter || voter.role !== "Мафия" || !voter.alive) return;
 
   roomData.nightVotes = roomData.nightVotes || {};
 
-  // ЗАЩИТА: уже голосовал
+ 
   if (roomData.nightVotes[playerId]) {
     socket.emit("errorMessage", { text: "Вы уже голосовали!" });
     return;
@@ -22,36 +22,37 @@ export async function handleNightVote(socket, io, client, { targetId }) {
 
   roomData.nightVotes[playerId] = targetId;
 
-  // Проверяем, все ли живые мафии проголосовали
+ 
   const livingMafia = roomData.players.filter(
     (p) => p.role === "Мафия" && p.alive
   );
   const allVoted = livingMafia.every((m) => roomData.nightVotes[m.playerId]);
 
   if (allVoted) {
-    // Подсчёт результатов
+ 
     const votes = Object.values(roomData.nightVotes);
     const voteResult = votes.reduce((acc, curr) => {
       acc[curr] = (acc[curr] || 0) + 1;
       return acc;
     }, {});
 
-    // Находим жертву по большинству голосов
+
     let victimId = Object.entries(voteResult).sort((a, b) => b[1] - a[1])[0][0];
     let victim = roomData.players.find((p) => p.playerId === victimId);
 
     if (victim && victim.alive) {
       victim.alive = false;
       roomData.lastKilled = victim.name;
-      await emitSystemMessage(io, client, room, `${victim.name} был убит ночью!`);
+      await emitSystemMessage(io, client, room, `Наступает утро... На асфальте виднеются следы крови...`);
+      await emitSystemMessage(io, client, room, `К сожалению, игрок ${victim.name} был убит этой ночью!`);
     }
 
     // Проверка победы!
     const win = await checkWinCondition(io, client, room, roomData);
     if (win) return;
 
-    // Меняем фазу на "День"
-    roomData.phase = "День";
+    // Меняем фазу на "day"
+    roomData.phase = "day";
     roomData.nightVotes = {};
 
     await client.set(`room:${room}`, JSON.stringify(roomData));
@@ -66,6 +67,6 @@ export async function handleNightVote(socket, io, client, { targetId }) {
       })),
     });
   } else {
-    socket.emit("voteReceived", { phase: "Ночь", votedFor: targetId });
+    socket.emit("voteReceived", { phase: "night", votedFor: targetId });
   }
 }

@@ -9,6 +9,7 @@ export function sendRoomState(io, room, roomData) {
       ready: !!p.ready,
       // можно добавить другие поля, если надо
     })),
-    phase: roomData.phase || 'lobby'
+    phase: roomData.phase || 'lobby',
+    maxPlayers: roomData.maxPlayers
   });
 }

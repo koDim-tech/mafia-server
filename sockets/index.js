@@ -12,6 +12,7 @@ import { handlePlayerMessage } from "../handlers/playerMessage.js";
 import { handleSetReady } from "../handlers/setReady.js";
 import { handleRestartGame } from "../handlers/restartGame.js";
 import { handleGetLobbies } from "../handlers/getLobbies.js";
+import { handleCreateRoom } from "../handlers/createRoom.js";
 
 export function registerSocketHandlers(server) {
   const io = new Server(server, {
@@ -20,6 +21,8 @@ export function registerSocketHandlers(server) {
 
   io.on("connection", (socket) => {
     console.log("Socket connected:", socket.id);
+
+    socket.on("createRoom", (payload) => handleCreateRoom(socket, io, client, payload));
 
     socket.on("joinRoom", (payload) =>
       handleJoinRoom(socket, io, client, payload)

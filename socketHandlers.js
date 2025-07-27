@@ -84,7 +84,7 @@ const { assignRoles } = require('./gameLogic');
 
   const roles = assignRoles(roomData.players);
   roomData.players = roomData.players.map((p, i) => ({ ...p, role: roles[i] }));
-  roomData.phase = 'Ночь';
+  roomData.phase = 'night';
   roomData.gameStarted = true;
 
   await client.set(`room:${room}`, JSON.stringify(roomData));
@@ -100,7 +100,7 @@ const { assignRoles } = require('./gameLogic');
   if (!room || !playerId) return;
   let raw = await client.get(`room:${room}`);
   let roomData = raw ? JSON.parse(raw) : null;
-  if (!roomData || roomData.phase !== 'Ночь') return;
+  if (!roomData || roomData.phase !== 'night') return;
 
   roomData.nightVotes = roomData.nightVotes || {};
   roomData.nightVotes[playerId] = targetId;
@@ -122,7 +122,7 @@ const { assignRoles } = require('./gameLogic');
       p.playerId === victimId ? { ...p, alive: false } : p
     );
     delete roomData.nightVotes;
-    roomData.phase = 'День';
+    roomData.phase = 'day';
     await client.set(`room:${room}`, JSON.stringify(roomData));
     io.to(room).emit('playerKilled', victimId);
     const gameEnded = await checkWinCondition(io, client, room, roomData);
@@ -137,7 +137,7 @@ const { assignRoles } = require('./gameLogic');
   if (!room || !playerId) return;
   let raw = await client.get(`room:${room}`);
   let roomData = raw ? JSON.parse(raw) : null;
-  if (!roomData || roomData.phase !== 'День') return;
+  if (!roomData || roomData.phase !== 'day') return;
 
   roomData.dayVotes = roomData.dayVotes || {};
   roomData.dayVotes[playerId] = targetId;
@@ -164,9 +164,9 @@ const { assignRoles } = require('./gameLogic');
 
     if (mostVoted.length > 1) {
       await emitSystemMessage(io, client, room, 'Ничья — никто не был казнен.');
-      roomData.phase = 'Ночь';
+      roomData.phase = 'night';
       await client.set(`room:${room}`, JSON.stringify(roomData));
-      io.to(room).emit('phaseChange', 'Ночь');
+      io.to(room).emit('phaseChange', 'night');
       await emitSystemMessage(io, client, room, 'Город засыпает...');
       return;
     }
@@ -179,9 +179,9 @@ const { assignRoles } = require('./gameLogic');
     const gameEnded = await checkWinCondition(io, client, room, roomData);
     if (gameEnded) return;
 
-    roomData.phase = 'Ночь';
+    roomData.phase = 'night';
     await client.set(`room:${room}`, JSON.stringify(roomData));
-    io.to(room).emit('phaseChange', 'Ночь');
+    io.to(room).emit('phaseChange', 'night');
     await emitSystemMessage(io, client, room, 'Город засыпает...');
   }
 } */
@@ -268,8 +268,8 @@ async function handleLeaveRoom(socket, io, client) {
 
   const raw = await client.get(`room:${room}`);
   const roomData = raw ? JSON.parse(raw) : null;
-  if (!roomData || roomData.phase !== 'День') {
-    console.log('Сообщение не доставлено — не день или нет комнаты');
+  if (!roomData || roomData.phase !== 'day') {
+    console.log('Сообщение не доставлено — не day или нет комнаты');
     return;
   }
 

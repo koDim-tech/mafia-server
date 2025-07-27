@@ -27,7 +27,7 @@ export async function handleStartGame(socket, io, client) {
   console.log('Фаза:', roomData?.phase);
 
   // Минимум игроков + все готовы
-  const allReady = roomData.players.length >= 4 &&
+  const allReady = roomData.players.length >= 1 &&
     roomData.players.every(p => p.ready);
 
   if (!allReady) {
@@ -45,9 +45,9 @@ export async function handleStartGame(socket, io, client) {
     player.alive = true;
   });
 
-  // Сохраняем роли, очищаем старые голоса, сбрасываем фазу на "Ночь"
+  // Сохраняем роли, очищаем старые голоса, сбрасываем фазу на "night"
   roomData.players = shuffled;
-  roomData.phase = 'Ночь';
+  roomData.phase = 'night';
   roomData.dayVotes = {};
   roomData.nightVotes = {};
   roomData.lastKilled = null;

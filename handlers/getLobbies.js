@@ -16,7 +16,7 @@ export async function handleGetLobbies(socket, io, client) {
         data = JSON.parse(raw);
       } catch { continue; }
 
-      // Фильтруем только те, что в лобби и не пустые
+      
       if (data.phase !== "lobby") continue;
       if (!data.players || data.players.length === 0) continue;
 
@@ -25,7 +25,8 @@ export async function handleGetLobbies(socket, io, client) {
         name: data.name || key.replace("room:", ""),
         players: data.players.length,
         maxPlayers: data.maxPlayers || 10,
-        phase: data.phase || "lobby"
+        phase: data.phase || "lobby",
+        private: data.private || false
       });
     }
     socket.emit("lobbies", lobbies);

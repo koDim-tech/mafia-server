@@ -8,7 +8,7 @@ export async function handleDayVote(socket, io, client, { targetId }) {
   const raw = await client.get(`room:${room}`);
   let roomData = raw ? JSON.parse(raw) : null;
 
-  if (!roomData || roomData.phase !== "День") return;
+  if (!roomData || roomData.phase !== "day") return;
 
   // Текущий игрок
   const voter = roomData.players.find((p) => p.playerId === playerId);
@@ -57,8 +57,8 @@ export async function handleDayVote(socket, io, client, { targetId }) {
     const win = await checkWinCondition(io, client, room, roomData);
     if (win) return; // Если победа, ничего больше не делаем
 
-    // Меняем фазу на "Ночь"
-    roomData.phase = "Ночь";
+    // Меняем фазу на "night"
+    roomData.phase = "night";
     roomData.dayVotes = {};
 
     await client.set(`room:${room}`, JSON.stringify(roomData));
@@ -74,7 +74,7 @@ export async function handleDayVote(socket, io, client, { targetId }) {
     });
   } else {
     // Подтверждение игроку что голос учтен
-    socket.emit("voteReceived", { phase: "День", votedFor: targetId });
+    socket.emit("voteReceived", { phase: "day", votedFor: targetId });
     // --- Обновляем roomData после каждого голоса ---
     await client.set(`room:${room}`, JSON.stringify(roomData));
   }

@@ -5,8 +5,8 @@ export async function handlePlayerMessage(socket, io, client, { text }) {
 
   const raw = await client.get(`room:${room}`);
   const roomData = raw ? JSON.parse(raw) : null;
-  if (!roomData || roomData.phase !== 'День') {
-    console.log('Сообщение не доставлено — не день или нет комнаты');
+  if (!roomData || roomData.phase !== 'day') {
+    console.log('Сообщение не доставлено — не day или нет комнаты');
     return;
   }
 
