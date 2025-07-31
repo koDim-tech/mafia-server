@@ -62,6 +62,7 @@ export async function handleStartGame(socket, io, client) {
 
   // Системное сообщение
   await emitSystemMessage(io, client, room, 'Игра началась! Роли назначены.');
+ 
 
   console.log('SEND phaseChanged:', {
     phase: roomData.phase,

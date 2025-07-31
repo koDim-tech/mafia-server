@@ -5,10 +5,27 @@ export async function removePlayerFromRoom({ room, playerId, client, io }) {
   let roomData = raw ? JSON.parse(raw) : null;
   if (!roomData) return { removed: false };
 
-  // Находим игрока
-  const leaver = roomData.players.find(p => p.playerId === playerId);
+  // Найти игрока
+  const player = roomData.players.find(p => p.playerId === playerId);
 
-  // Удаляем игрока из списка
+  // --- Если сейчас идет игра (не лобби) — просто делаем игрока мертвым (зрителем)
+  if (roomData.phase !== 'lobby' && player) {
+    if (player.alive) {
+      player.alive = false;
+      await client.set(`room:${room}`, JSON.stringify(roomData));
+      io.to(room).emit('roomData', { players: roomData.players, phase: roomData.phase });
+      // После смерти — сразу проверяем победу (если вдруг мафия победила по количеству)
+      const aliveMafia = roomData.players.filter(p => p.role === 'Мафия' && p.alive);
+      const aliveCiv = roomData.players.filter(p => p.role !== 'Мафия' && p.alive);
+      if (aliveMafia.length === 0 || aliveMafia.length >= aliveCiv.length) {
+        await checkWinCondition(io, client, room, roomData);
+      }
+    }
+    // Не удаляем из массива!
+    return { removed: true, last: false };
+  }
+
+  // --- Если лобби, или игрока уже нет — удаляем как раньше
   roomData.players = roomData.players.filter(p => p.playerId !== playerId);
 
   // Если есть mafia/civilians массивы — чистим
@@ -19,17 +36,6 @@ export async function removePlayerFromRoom({ room, playerId, client, io }) {
     roomData.civilians = roomData.civilians.filter(id => id !== playerId);
   }
 
-  // === ВАЖНО ===
-  // Только если игра идет (phase !== 'lobby'), проверяем победу!
-  if (roomData.phase !== 'lobby') {
-    // Твой старый паттерн: передаём io, client, room, roomData
-    const win = await checkWinCondition(io, client, room, roomData);
-    if (win) {
-      // checkWinCondition уже сам удалит комнату и пошлет события
-      return { removed: true, last: false, gameEnded: true };
-    }
-  }
-
   // Если игроков не осталось — удаляем комнату (всегда!)
   if (roomData.players.length === 0) {
     await client.del(`room:${room}`);
@@ -38,10 +44,9 @@ export async function removePlayerFromRoom({ room, playerId, client, io }) {
   } else {
     await client.set(`room:${room}`, JSON.stringify(roomData));
     // Системное сообщение
-    if (leaver) {
-      io.to(room).emit('systemMessage', { text: `${leaver.name} покиннул комнату` });
+    if (player) {
+      io.to(room).emit('systemMessage', { text: `${player.name} покинул комнату` });
     }
-    // Только обновляем roomData, никаких gameOver!
     io.to(room).emit('roomData', { players: roomData.players, phase: roomData.phase });
     return { removed: true, last: false };
   }

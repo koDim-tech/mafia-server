@@ -1,42 +1,72 @@
+// handlers/joinRoom.js
 import { emitSystemMessage } from "../utils/chatUtils.js";
+import { validate as uuidValidate } from "uuid";
 
-// Для race protection — можно сделать простую блокировку на уровне кода (или через Redis-lock, но тут не нужно)
+// Регулярки для валидации
+const ROOM_ID_RE      = /^[\w-]{3,30}$/;          // a-zA-Z0-9_-
+const PLAYER_NAME_RE  = /^[\p{L}0-9 _-]{1,20}$/u; // буквы любых алфавитов, цифры, пробел, _-
+const MAX_PASSWORD_LEN = 30;
+
 export async function handleJoinRoom(
   socket,
   io,
   client,
   { name, room, playerId, password }
 ) {
-  console.log(`Player ${name} (${playerId}) is trying to join room: ${room}`);
+  // 1. Типы и простая валидация
+  if (
+    typeof name !== "string" ||
+    typeof room !== "string" ||
+    typeof playerId !== "string"
+  ) {
+    return socket.emit("joinRoomError", { message: "Некорректные данные." });
+  }
+  name = name.trim();
+  if (!PLAYER_NAME_RE.test(name)) {
+    return socket.emit("joinRoomError", { message: "Неверное имя игрока." });
+  }
+  if (!ROOM_ID_RE.test(room)) {
+    return socket.emit("joinRoomError", { message: "Неверный ID комнаты." });
+  }
+  if (!uuidValidate(playerId)) {
+    return socket.emit("joinRoomError", { message: "Некорректный playerId." });
+  }
+  if (password !== undefined) {
+    if (typeof password !== "string" || password.length > MAX_PASSWORD_LEN) {
+      return socket.emit("joinRoomError", { message: "Неверный пароль." });
+    }
+  }
 
-  let raw = await client.get(`room:${room}`);
+  // 2. Начинаем WATCH на ключ
+  await client.watch(`room:${room}`);
+  const raw = await client.get(`room:${room}`);
   if (!raw) {
-    socket.emit("joinRoomError", { message: "Комната не найдена" });
-    return;
+    await client.unwatch();
+    return socket.emit("joinRoomError", { message: "Комната не найдена." });
   }
-  let roomData = JSON.parse(raw);
 
+  const roomData = JSON.parse(raw);
+  // 3. Права доступа
   if (roomData.private && roomData.password !== password) {
-    socket.emit("joinRoomError", { message: "Неверный пароль" });
-    return;
+    await client.unwatch();
+    return socket.emit("joinRoomError", { message: "Неверный пароль." });
   }
 
-  // Найдем игрока по playerId (на случай реконнекта)
-  let existing = roomData.players.find((p) => p.playerId === playerId);
-  let isHost = false;
+  // 4. Ищем существующего (реконнект) или проверяем лимит
+  let existing = roomData.players.find(p => p.playerId === playerId);
+  if (!existing && roomData.players.length >= roomData.maxPlayers) {
+    await client.unwatch();
+    return socket.emit("joinRoomError", { message: "Нет свободных мест." });
+  }
 
-  // Сначала — если он уже в комнате, просто обновляем id
+  let isHost = false;
   if (existing) {
+    // реконнект
     existing.id = socket.id;
     existing.name = name;
     isHost = existing.isHost;
   } else {
-    // Проверяем место только при добавлении нового
-    if (roomData.players.length >= roomData.maxPlayers) {
-      socket.emit("joinRoomError", { message: "В комнате нет свободных мест" });
-      return;
-    }
-    // Если еще не было — добавляем
+    // новый вход
     isHost = roomData.players.length === 0;
     roomData.players.push({
       id: socket.id,
@@ -47,84 +77,67 @@ export async function handleJoinRoom(
       role: null,
       ready: false,
     });
-
-    // 👉 СРАЗУ после добавления — перепроверяем лимит!
-/*     if (roomData.players.length > roomData.maxPlayers) {
-      // Откатываем добавление
-      roomData.players = roomData.players.filter(p => p.playerId !== playerId);
-      await client.set(`room:${room}`, JSON.stringify(roomData));
-      console.log('-1 player')
-      socket.emit("joinRoomError", { message: "В комнате уже нет мест" });
-      return;
-    } */
   }
 
-  // Фаза "не лобби" — не пускать новых
+  // 5. Не пускаем новых, если не в лобби
   if (roomData.phase !== "lobby" && !existing) {
-    socket.emit("gameAlreadyStarted");
-    return;
+    await client.unwatch();
+    return socket.emit("gameAlreadyStarted");
   }
 
-  // Сохраняем обновленную комнату
-  await client.set(`room:${room}`, JSON.stringify(roomData));
+  // 6. Атомарно сохраняем только если никто не успел изменить за это время
+  const tx = client.multi();
+  tx.set(`room:${room}`, JSON.stringify(roomData));
+  const execResult = await tx.exec(); // null — значит конфликт
+
+  if (!execResult) {
+    // кто-то другой модифицировал комнату
+    return socket.emit("joinRoomError", { message: "Попробуйте ещё раз." });
+  }
+
+  // 7. Всё в порядке — подключаем
   socket.join(room);
   socket.data = { room, playerId };
 
-  // Рассылаем roomData всем в комнате
+  // 8. Шлём обновлённое состояние всем в комнате
+  const publicPlayers = roomData.players.map(p => ({
+    name:     p.name,
+    playerId: p.playerId,
+    isHost:   p.isHost,
+    alive:    p.alive,
+    ready:    !!p.ready,
+  }));
   io.to(room).emit("roomData", {
-    players: roomData.players.map((p) => ({
-      name: p.name,
-      playerId: p.playerId,
-      isHost: p.isHost,
-      alive: p.alive,
-      ready: !!p.ready,
-    })),
-    phase: roomData.phase,
-    maxPlayers: roomData.maxPlayers,
+    players:    publicPlayers,
+    phase:      roomData.phase,
+    maxPlayers: roomData.maxPlayers
   });
 
-  // Лично подключившемуся "roomJoined"
   socket.emit("roomJoined", {
-    players: roomData.players.map((p) => ({
-      name: p.name,
-      playerId: p.playerId,
-      isHost: p.isHost,
-      alive: p.alive,
-      ready: !!p.ready,
-    })),
+    players:     publicPlayers,
     gameStarted: roomData.phase !== "lobby",
-    maxPlayers: roomData.maxPlayers,
+    maxPlayers:  roomData.maxPlayers
   });
 
-  // Если игра уже идет — отправить роль/статус
-  if (roomData.phase && roomData.phase !== "lobby") {
-    const player = roomData.players.find((p) => p.playerId === playerId);
-    if (player && player.role) {
-      socket.emit("roleAssigned", { role: player.role });
-    }
-    if (player && player.alive === false) {
-      socket.emit("playerKilled", playerId);
-    }
+  // 9. Если игра уже идёт — возвращаем роль/статус
+  if (roomData.phase !== "lobby") {
+    const me = roomData.players.find(p => p.playerId === playerId);
+    if (me?.role)    socket.emit("roleAssigned",  { role: me.role });
+    if (!me?.alive)  socket.emit("playerKilled", playerId);
     io.to(room).emit("phaseChanged", {
-      phase: roomData.phase,
+      phase:      roomData.phase,
       maxPlayers: roomData.maxPlayers,
-      players: roomData.players.map((p) => ({
-        name: p.name,
-        playerId: p.playerId,
-        isHost: p.isHost,
-        alive: p.alive,
-        ready: !!p.ready,
-      })),
+      players:    publicPlayers
     });
   }
 
-  // Чат-история
+  // 10. Чат‑история и welcome
   const historyKey = `chat:${room}`;
-  const storedMessages = await client.lRange(historyKey, 0, -1);
-  const messages = storedMessages.map((m) => JSON.parse(m));
-  socket.emit("chatHistory", messages);
+  const stored = await client.lRange(historyKey, 0, -1);
+  socket.emit("chatHistory", stored.map(m => JSON.parse(m)));
 
-  // Системное сообщение
-  roomData.phase === "lobby" && await emitSystemMessage(io, client, room, `${name} присоединился к комнате.`);
+  if (roomData.phase === "lobby") {
+    await emitSystemMessage(io, client, room, `${name} присоединился к комнате.`);
+  }
   socket.emit("welcome", { playerId, isHost });
 }
