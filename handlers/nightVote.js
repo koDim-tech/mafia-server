@@ -1,5 +1,6 @@
+import { PHASE_DISCUSSION_MS } from "../gameSettings.js";
 import { checkWinCondition } from "../services/checkWinCondition.js";
-import { emitSystemMessage } from "../utils/chatUtils.js";
+import { emitSystemMessage, sleep } from "../utils/chatUtils.js";
 
 export async function handleNightVote(socket, io, client, { targetId }) {
   const { room, playerId } = socket.data;
@@ -39,25 +40,24 @@ export async function handleNightVote(socket, io, client, { targetId }) {
 
     const tx = client.multi();
 
+    // -- объявляем заранее
+    let victim = null;
+    let victimId = null;
+
     if (allVoted) {
-      // Подсчёт результатов
       const votes = Object.values(roomData.nightVotes);
       const voteResult = votes.reduce((acc, curr) => {
         acc[curr] = (acc[curr] || 0) + 1;
         return acc;
       }, {});
-
-      let victimId = Object.entries(voteResult).sort((a, b) => b[1] - a[1])[0][0];
-      let victim = roomData.players.find((p) => p.playerId === victimId);
+      victimId = Object.entries(voteResult).sort((a, b) => b[1] - a[1])[0][0];
+      victim = roomData.players.find((p) => p.playerId === victimId);
 
       if (victim && victim.alive) {
         victim.alive = false;
         roomData.lastKilled = victim.name;
-        await emitSystemMessage(io, client, room, `Наступает утро... На асфальте виднеются следы крови...`);
-        await emitSystemMessage(io, client, room, `К сожалению, игрок ${victim.name} был убит этой ночью!`);
       }
 
-      // Проверка победы!
       const win = await checkWinCondition(io, client, room, roomData);
       if (win) {
         await client.unwatch();
@@ -81,12 +81,20 @@ export async function handleNightVote(socket, io, client, { targetId }) {
             alive: p.alive,
           })),
         });
+
+        if (victim && victim.alive === false) {
+          await emitSystemMessage(io, client, room, `Наступает утро... На асфальте виднеются следы крови...`);
+          await emitSystemMessage(io, client, room, `К сожалению, игрок ${victim.name} был убит этой ночью!`);
+          await sleep(2000);
+        }
+        await emitSystemMessage(io, client, room, 'Самое время обсудить итоги этой ночи... Время');
+        await sleep(PHASE_DISCUSSION_MS);
       } else {
         socket.emit("voteReceived", { phase: "night", votedFor: targetId });
       }
       return;
     }
-    // retry если была гонка
   }
   socket.emit("errorMessage", { text: "Ошибка голосования, попробуйте ещё раз" });
 }
+

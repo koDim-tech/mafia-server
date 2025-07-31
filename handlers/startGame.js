@@ -9,24 +9,15 @@ export async function handleStartGame(socket, io, client) {
   let raw = await client.get(`room:${room}`);
   let roomData = raw ? JSON.parse(raw) : null;
 
-  // Первая защита!
   if (!roomData || roomData.phase !== 'lobby') {
     console.log('[WARN] Не найдено roomData или неверная фаза для старта', { roomData });
     return;
   }
-
-  // Дополнительная защита!
   if (!Array.isArray(roomData.players) || roomData.players.length === 0) {
     socket.emit('errorMessage', { text: 'Нет игроков для старта' });
     return;
   }
 
-  // Теперь можно безопасно логировать игроков!
-  console.log('СОСТАВ roomData.players:', JSON.stringify(roomData.players, null, 2));
-  console.log('Старт игры:', roomData.players.length, 'игроков');
-  console.log('Фаза:', roomData?.phase);
-
-  // Минимум игроков + все готовы
   const allReady = roomData.players.length >= 1 &&
     roomData.players.every(p => p.ready);
 
@@ -35,7 +26,6 @@ export async function handleStartGame(socket, io, client) {
     return;
   }
 
-  // Назначение ролей
   const players = [...roomData.players];
   const mafiaCount = Math.max(1, Math.floor(players.length / 4));
   const shuffled = players.sort(() => Math.random() - 0.5);
@@ -45,38 +35,19 @@ export async function handleStartGame(socket, io, client) {
     player.alive = true;
   });
 
-  // Сохраняем роли, очищаем старые голоса, сбрасываем фазу на "night"
   roomData.players = shuffled;
   roomData.phase = 'night';
   roomData.dayVotes = {};
   roomData.nightVotes = {};
   roomData.lastKilled = null;
-  roomData.messages = []; // Если есть чат — можно очищать
+  roomData.messages = [];
 
   await client.set(`room:${room}`, JSON.stringify(roomData));
 
-  // Личный emit — роль каждому игроку (по socket.id)
+  // Сразу отправляем роли и фазу (чтобы UI был отзывчивым)
   for (const player of roomData.players) {
     io.to(player.id).emit('roleAssigned', { role: player.role });
   }
-
-  // Системное сообщение
-  await emitSystemMessage(io, client, room, 'Игра началась! Роли назначены.');
- 
-
-  console.log('SEND phaseChanged:', {
-    phase: roomData.phase,
-    players: roomData.players.map(p => ({
-      name: p.name,
-      playerId: p.playerId,
-      id: p.id,
-      isHost: p.isHost,
-      alive: p.alive,
-      role: p.role,
-    }))
-  });
-
-  // Групповой emit — ВСЕ публичные данные (!!! теперь с playerId !!!)
   io.to(room).emit('phaseChanged', {
     phase: roomData.phase,
     players: roomData.players.map(p => ({
@@ -84,7 +55,10 @@ export async function handleStartGame(socket, io, client) {
       playerId: p.playerId,
       isHost: p.isHost,
       alive: p.alive,
-      // role: p.role // добавлять только если ты хочешь чтобы все знали роли
     }))
   });
+
+  // Потом - системные сообщения и возможная пауза
+  await emitSystemMessage(io, client, room, 'Игра началась! Роли назначены.');
+  await emitSystemMessage(io, client, room, 'Первая ночь наступает. Мафия, сделайте свой ход.');
 }

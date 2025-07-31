@@ -20,4 +20,6 @@ export async function emitToMafiaOnly(io, client, room, text, players) {
 }
 
 
+export const sleep = ms => new Promise(res => setTimeout(res, ms));
+
 
