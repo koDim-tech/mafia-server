@@ -1,3 +1,4 @@
+import { PHASES } from '../constants.js';
 import { assignRoles } from '../gameLogic.js';
 import { emitSystemMessage } from '../utils/chatUtils.js';
 
@@ -9,7 +10,7 @@ export async function handleStartGame(socket, io, client) {
   let raw = await client.get(`room:${room}`);
   let roomData = raw ? JSON.parse(raw) : null;
 
-  if (!roomData || roomData.phase !== 'lobby') {
+  if (!roomData || roomData.phase !== PHASES.LOBBY) {
     console.log('[WARN] Не найдено roomData или неверная фаза для старта', { roomData });
     return;
   }
@@ -58,7 +59,6 @@ export async function handleStartGame(socket, io, client) {
     }))
   });
 
-  // Потом - системные сообщения и возможная пауза
   await emitSystemMessage(io, client, room, 'Игра началась! Роли назначены.');
   await emitSystemMessage(io, client, room, 'Первая ночь наступает. Мафия, сделайте свой ход.');
 }
