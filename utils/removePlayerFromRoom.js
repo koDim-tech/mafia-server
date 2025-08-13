@@ -1,3 +1,4 @@
+import { ROLES } from '../constants.js';
 import { checkWinCondition } from '../services/checkWinCondition.js';
 
 export async function removePlayerFromRoom({ room, playerId, client, io }) {
@@ -15,8 +16,8 @@ export async function removePlayerFromRoom({ room, playerId, client, io }) {
       await client.set(`room:${room}`, JSON.stringify(roomData));
       io.to(room).emit('roomData', { players: roomData.players, phase: roomData.phase });
       // После смерти — сразу проверяем победу (если вдруг мафия победила по количеству)
-      const aliveMafia = roomData.players.filter(p => p.role === 'Мафия' && p.alive);
-      const aliveCiv = roomData.players.filter(p => p.role !== 'Мафия' && p.alive);
+      const aliveMafia = roomData.players.filter(p => p.role === ROLES.MAFIA && p.alive);
+      const aliveCiv = roomData.players.filter(p => p.role !== ROLES.MAFIA && p.alive);
       if (aliveMafia.length === 0 || aliveMafia.length >= aliveCiv.length) {
         await checkWinCondition(io, client, room, roomData);
       }

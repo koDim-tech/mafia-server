@@ -66,7 +66,7 @@ export async function handleDayVote(socket, io, client, { targetId }) {
       }
 
       // Только если не победа:
-      roomData.phase = PHASES.NIGHT;
+      roomData.phase = PHASES.NIGHT_MAFIA;
       roomData.dayVotes = {};
     }
 
