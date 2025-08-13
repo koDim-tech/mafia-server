@@ -1,10 +1,12 @@
 
 
-export async function emitSystemMessage(io, client, room, text) {
-  const message = { type: 'system', text };
+export async function emitSystemMessage(io, client, room, text, options = {}) {
+  // options: { delay, type, ... }
+  const message = { type: 'system', text, ...options };
   await client.rPush(`chat:${room}`, JSON.stringify(message));
   io.to(room).emit('systemMessage', message);
 }
+
 
 export async function emitToMafiaOnly(io, client, room, text, players) {
   const message = { type: 'system', text };

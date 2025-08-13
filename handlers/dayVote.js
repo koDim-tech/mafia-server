@@ -1,10 +1,10 @@
 import { PHASE_DISCUSSION_MS } from "../gameSettings.js";
-import { checkWinCondition } from "../services/checkWinCondition.js";
 import { emitSystemMessage, sleep } from "../utils/chatUtils.js";
 import { getLivingPlayers, getPlayer } from "../utils/players.js";
-import { PHASES } from "../constants.js";
 import { withRedisTransaction } from "../utils/withRedisTransaction.js";
 import { countVotes } from "../utils/votes.js";
+import { ROLES, ROLES_DISTRIBUTION,PHASES } from '../constants.js';
+import { checkWinCondition } from "../services/checkWinCondition.js";
 
 
 export async function handleDayVote(socket, io, client, { targetId }) {
@@ -27,11 +27,10 @@ export async function handleDayVote(socket, io, client, { targetId }) {
     }
     roomData.dayVotes[playerId] = targetId;
 
-    // Системное сообщение о голосе
+    // Сообщение о голосе (после коммита)
     const target = roomData.players.find((p) => p.playerId === targetId);
     let afterCommitMsg = null;
     if (target) {
-      // Передаём функцию для afterCommit, чтобы она не ждала внутри транзакции
       afterCommitMsg = async () => {
         await emitSystemMessage(
           io,
@@ -46,38 +45,56 @@ export async function handleDayVote(socket, io, client, { targetId }) {
     const allVoted = livingPlayers.every((pl) => roomData.dayVotes[pl.playerId]);
 
     let victim = null;
-    let victimId = null;
     let win = null;
 
-   if (allVoted) {
-  const { victimId, votes, isTie } = countVotes(roomData.dayVotes, { allowTie: false });
-  victim = victimId && roomData.players.find((p) => p.playerId === victimId);
+    if (allVoted) {
+      const { victimId: votedVictimId } = countVotes(roomData.dayVotes, { allowTie: false });
+      victim = votedVictimId && roomData.players.find((p) => p.playerId === votedVictimId);
 
-  if (victim && victim.alive) {
-    victim.alive = false;
-    roomData.lastKilled = victim.name;
-  }
+      if (victim && victim.alive) {
+        victim.alive = false;
+        roomData.lastKilled = victim.name;
+      }
 
-  win = await checkWinCondition(io, client, room, roomData);
-  if (win) {
-    return [roomData, afterCommitMsg];
-  }
+      win = await checkWinCondition(io, client, room, roomData);
+      if (win) {
+        // ВНИМАНИЕ: больше ничего не делаем — только сообщение о голосе!
+        const afterCommitWin = async () => {
+          if (afterCommitMsg) await afterCommitMsg();
+        };
+        return [roomData, afterCommitWin];
+      }
 
-  // Переход в ночь
-  roomData.phase = PHASES.NIGHT;
-  roomData.dayVotes = {};
-}
+      // Только если не победа:
+      roomData.phase = PHASES.NIGHT_MAFIA;
+      roomData.dayVotes = {};
+    }
 
-
-    // afterCommit: всё, что не влияет на roomData
     const afterCommit = async () => {
-      // Сначала сообщение о голосе (если оно было)
       if (afterCommitMsg) await afterCommitMsg();
 
       if (!allVoted) {
         socket.emit("voteReceived", { phase: "day", votedFor: targetId });
         return;
       }
+
+      // --- Если после afterCommitMsg фаза уже стала gameOver — ничего не делаем!
+      if (roomData.phase === "gameOver" || roomData.phase === PHASES.END) return;
+
+      if (victim && victim.alive === false) {
+        await emitSystemMessage(
+          io,
+          client,
+          room,
+          `Голосование завершено. ${victim.name} был изгнан из города!`
+        );
+      }
+      await emitSystemMessage(
+        io,
+        client,
+        room,
+        "Город засыпает. Наступает ночь..."
+      );
 
       io.to(room).emit("phaseChanged", {
         phase: roomData.phase,
@@ -88,23 +105,6 @@ export async function handleDayVote(socket, io, client, { targetId }) {
           alive: p.alive,
         })),
       });
-
-      if (victim && victim.alive === false) {
-        await emitSystemMessage(
-          io,
-          client,
-          room,
-          `Голосование завершено. ${victim.name} был изгнан из города!`
-        );
-        await sleep(1000);
-      }
-      await emitSystemMessage(
-        io,
-        client,
-        room,
-        "Город засыпает. Наступает ночь..."
-      );
-      await sleep(PHASE_DISCUSSION_MS);
     };
 
     return [roomData, afterCommit];

@@ -1,6 +1,6 @@
 // handlers/getLobbies.js
 export async function handleGetLobbies(socket, io, client) {
-     console.log("getLobbies запрос от", socket.id);
+    /*  console.log("getLobbies запрос от", socket.id); */
   try {
     const keys = await client.keys('room:*');
     const lobbies = [];

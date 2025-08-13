@@ -1,9 +1,10 @@
-import { PHASES } from '../constants.js';
-import { assignRoles } from '../gameLogic.js';
-import { emitSystemMessage } from '../utils/chatUtils.js';
+import { PHASES } from "../constants.js";
+import { assignRoles } from "../services/assingRoles.js";
+import { emitSystemMessage, sleep } from "../utils/chatUtils.js";
+
 
 export async function handleStartGame(socket, io, client) {
-  console.log('Запрос на старт игры от', socket.id);
+  console.log("Запрос на старт игры от", socket.id);
   const { room } = socket.data;
   if (!room) return;
 
@@ -11,54 +12,56 @@ export async function handleStartGame(socket, io, client) {
   let roomData = raw ? JSON.parse(raw) : null;
 
   if (!roomData || roomData.phase !== PHASES.LOBBY) {
-    console.log('[WARN] Не найдено roomData или неверная фаза для старта', { roomData });
+    console.log("[WARN] Не найдено roomData или неверная фаза для старта", { roomData });
     return;
   }
   if (!Array.isArray(roomData.players) || roomData.players.length === 0) {
-    socket.emit('errorMessage', { text: 'Нет игроков для старта' });
+    socket.emit("errorMessage", { text: "Нет игроков для старта" });
     return;
   }
 
-  const allReady = roomData.players.length >= 1 &&
-    roomData.players.every(p => p.ready);
+  const allReady =
+    roomData.players.length >= 1 && roomData.players.every((p) => p.ready);
 
   if (!allReady) {
-    socket.emit('errorMessage', { text: 'Не все игроки готовы или слишком мало игроков' });
+    socket.emit("errorMessage", {
+      text: "Не все игроки готовы или слишком мало игроков",
+    });
     return;
   }
 
-  const players = [...roomData.players];
-  const mafiaCount = Math.max(1, Math.floor(players.length / 4));
-  const shuffled = players.sort(() => Math.random() - 0.5);
-
-  shuffled.forEach((player, idx) => {
-    player.role = idx < mafiaCount ? 'Мафия' : 'Мирный';
-    player.alive = true;
-  });
+  // 1. Назначаем роли и переводим в фазу голосования мафии
+  const shuffled = assignRoles(roomData.players);
 
   roomData.players = shuffled;
-  roomData.phase = 'night';
+  roomData.phase = PHASES.NIGHT_MAFIA;
   roomData.dayVotes = {};
   roomData.nightVotes = {};
+  roomData.doctorChoice = null;
   roomData.lastKilled = null;
   roomData.messages = [];
 
   await client.set(`room:${room}`, JSON.stringify(roomData));
 
-  // Сразу отправляем роли и фазу (чтобы UI был отзывчивым)
+  // 2. Сразу отправляем роли и фазу всем игрокам
   for (const player of roomData.players) {
-    io.to(player.id).emit('roleAssigned', { role: player.role });
+    io.to(player.id).emit("roleAssigned", { role: player.role });
   }
-  io.to(room).emit('phaseChanged', {
+
+  io.to(room).emit("phaseChanged", {
     phase: roomData.phase,
-    players: roomData.players.map(p => ({
+    players: roomData.players.map((p) => ({
       name: p.name,
       playerId: p.playerId,
       isHost: p.isHost,
       alive: p.alive,
-    }))
+    })),
   });
 
-  await emitSystemMessage(io, client, room, 'Игра началась! Роли назначены.');
-  await emitSystemMessage(io, client, room, 'Первая ночь наступает. Мафия, сделайте свой ход.');
+  // 3. Теперь сообщения с задержкой (только для атмосферы)
+  await emitSystemMessage(io, client, room, "Добро пожаловать в игру! Пожалуйста, ознакомьтесь с вашими ролями.", { delay: 3000 });
+ /*  await sleep(4000) */;
+  await emitSystemMessage(io, client, room, "Игра началась! Будьте внимательны и осторожны.", { delay: 2000 });
+ /*  await sleep(2500); */
+  await emitSystemMessage(io, client, room, "Первая ночь наступает. Мафия, сделайте свой ход.", { delay: 2000 });
 }
