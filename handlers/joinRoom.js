@@ -18,14 +18,14 @@ export async function handleJoinRoom(
   const userName = user?.name || name;
   const userAvatar = user?.photo_url || null;
   if (
-    typeof name !== "string" ||
+    typeof userName !== "string" ||
     typeof room !== "string" ||
     typeof playerId !== "string"
   ) {
     return socket.emit("joinRoomError", { message: "Некорректные данные." });
   }
   name = name.trim();
-  if (!PLAYER_NAME_RE.test(name)) {
+  if (!PLAYER_NAME_RE.test(userName)) {
     return socket.emit("joinRoomError", { message: "Неверное имя игрока." });
   }
   if (!ROOM_ID_RE.test(room)) {
@@ -66,7 +66,7 @@ export async function handleJoinRoom(
   if (existing) {
     // реконнект
     existing.id = socket.id;
-    existing.name = name;
+    existing.name = userName;
     isHost = existing.isHost;
   } else {
     // новый вход
