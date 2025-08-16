@@ -8,6 +8,35 @@ const ROOM_ID_RE      = /^[\w-]{3,30}$/;          // a-zA-Z0-9_-
 const PLAYER_NAME_RE  = /^[\p{L}0-9 _-]{1,20}$/u; // буквы любых алфавитов, цифры, пробел, _-
 const MAX_PASSWORD_LEN = 30;
 
+function buildUserName(user, fallbackName) {
+  // Кандидаты имени в приоритетном порядке
+  const candidates = [
+    user?.username ? `@${user.username}` : null,
+    [user?.first_name, user?.last_name].filter(Boolean).join(" ") || null,
+    user?.username || null, // вдруг есть
+    fallbackName || null,
+  ].filter(Boolean);
+
+  let display = (candidates[0] || "").normalize("NFKC").trim();
+
+  // Если пусто — создадим безопасный псевдоним
+  if (!display) {
+    display = "Игрок-" + Math.random().toString(36).slice(2, 6);
+  }
+
+  // Обрежем до 20 символов (под вашу регулярку)
+  if (display.length > 20) display = display.slice(0, 20).trim();
+
+  // Если не проходит вашу REGEX — мягко санитизируем (уберём всё, кроме разрешённого)
+  if (!PLAYER_NAME_RE.test(display)) {
+    display = display.replace(/[^\p{L}0-9 _-]/gu, "").trim();
+    if (!display) display = "Игрок-" + Math.random().toString(36).slice(2, 6);
+    if (display.length > 20) display = display.slice(0, 20).trim();
+  }
+
+  return display;
+}
+
 export async function handleJoinRoom(
   socket,
   io,
@@ -16,7 +45,7 @@ export async function handleJoinRoom(
 ) {
   console.log(user)
   const userId = user?.id || null;
-  const userName = user?.name || name;
+  const userName = buildUserName(user, typeof name === "string" ? name : "");
   const userAvatar = user?.photo_url || null;
   if (
     typeof userName !== "string" ||
@@ -25,7 +54,7 @@ export async function handleJoinRoom(
   ) {
     return socket.emit("joinRoomError", { message: "Некорректные данные." });
   }
-  name = name.trim();
+  
   if (!PLAYER_NAME_RE.test(userName)) {
     return socket.emit("joinRoomError", { message: "Неверное имя игрока." });
   }
@@ -143,7 +172,7 @@ export async function handleJoinRoom(
   socket.emit("chatHistory", stored.map(m => JSON.parse(m)));
 
   if (roomData.phase === "lobby") {
-    await emitSystemMessage(io, client, room, `${name} присоединился к комнате.`);
+    await emitSystemMessage(io, client, room, `${userName} присоединился к комнате.`);
   }
   socket.emit("welcome", { playerId, isHost });
 }
