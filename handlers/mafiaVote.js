@@ -7,13 +7,6 @@ import { checkWinCondition } from "../services/checkWinCondition.js";
 
 
 
-import { PHASES, ROLES } from "../constants.js";
-import { emitSystemMessage } from "../utils/chatUtils.js";
-import { getLivingMafia, getPlayer } from "../utils/players.js";
-import { withRedisTransaction } from "../utils/withRedisTransaction.js";
-import { countVotes } from "../utils/votes.js";
-import { checkWinCondition } from "../services/checkWinCondition.js";
-
 export async function handleMafiaVote(socket, io, client, { targetId }) {
   console.log("Mafia vote request from", socket.id);
   const { room, playerId } = socket.data;
