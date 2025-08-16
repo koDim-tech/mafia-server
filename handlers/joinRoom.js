@@ -14,6 +14,7 @@ export async function handleJoinRoom(
   client,
   { name, user, room, playerId, password }
 ) {
+  console.log(user)
   const userId = user?.id || null;
   const userName = user?.name || name;
   const userAvatar = user?.photo_url || null;
