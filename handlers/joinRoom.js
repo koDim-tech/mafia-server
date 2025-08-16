@@ -8,28 +8,24 @@ const ROOM_ID_RE      = /^[\w-]{3,30}$/;          // a-zA-Z0-9_-
 const PLAYER_NAME_RE  = /^[\p{L}0-9 _-]{1,20}$/u; // буквы любых алфавитов, цифры, пробел, _-
 const MAX_PASSWORD_LEN = 30;
 
-function buildUserName(user, fallbackName) {
-  // Кандидаты имени в приоритетном порядке
-  const candidates = [
-    user?.username ? `@${user.username}` : null,
-    [user?.first_name, user?.last_name].filter(Boolean).join(" ") || null,
-    user?.username || null, // вдруг есть
-    fallbackName || null,
-  ].filter(Boolean);
+function buildUserName(user) {
+  if (!user || typeof user !== "object") return "Игрок";
 
-  let display = (candidates[0] || "").normalize("NFKC").trim();
+  // приоритет: username → first_name + last_name → first_name → fallback
+  const candidate =
+    (user.username ? `@${user.username}` : null) ||
+    [user.first_name, user.last_name].filter(Boolean).join(" ") ||
+    user.first_name ||
+    "Игрок";
 
-  // Если пусто — создадим безопасный псевдоним
-  if (!display) {
-    display = "Игрок-" + Math.random().toString(36).slice(2, 6);
-  }
+  let display = candidate.normalize("NFKC").trim();
 
-  // Обрежем до 20 символов (под вашу регулярку)
+  // ограничение по длине
   if (display.length > 20) display = display.slice(0, 20).trim();
 
-  // Если не проходит вашу REGEX — мягко санитизируем (уберём всё, кроме разрешённого)
+  // чистим недопустимые символы
   if (!PLAYER_NAME_RE.test(display)) {
-    display = display.replace(/[^\p{L}0-9 _-]/gu, "").trim();
+    display = display.replace(/[^\p{L}0-9 _\-@]/gu, "").trim();
     if (!display) display = "Игрок-" + Math.random().toString(36).slice(2, 6);
     if (display.length > 20) display = display.slice(0, 20).trim();
   }
@@ -41,11 +37,11 @@ export async function handleJoinRoom(
   socket,
   io,
   client,
-  { name, user, room, playerId, password }
+  { user, room, playerId, password }
 ) {
   console.log(user)
   const userId = user?.id || null;
-  const userName = buildUserName(user, typeof name === "string" ? name : "");
+  const userName = buildUserName(user);
   const userAvatar = user?.photo_url || null;
   if (
     typeof userName !== "string" ||
