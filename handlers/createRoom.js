@@ -5,8 +5,8 @@ export async function handleCreateRoom(socket, io, client, {
   password,
 }) {
   try {
-    // Генерируем id как и раньше
-    const roomId = (name || "room") + "-" + Math.random().toString(36).slice(2, 7);
+
+    const roomId = `room-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
     const roomData = {
       name,
