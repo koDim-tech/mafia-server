@@ -1,4 +1,5 @@
 // handlers/joinRoom.js
+import { use } from "react";
 import { emitSystemMessage } from "../utils/chatUtils.js";
 import { validate as uuidValidate } from "uuid";
 
@@ -11,9 +12,11 @@ export async function handleJoinRoom(
   socket,
   io,
   client,
-  { name, room, playerId, password }
+  { name, user, room, playerId, password }
 ) {
-  // 1. Типы и простая валидация
+  const userId = user?.id || null;
+  const userName = user?.name || name;
+  const userAvatar = user?.photo_url || null;
   if (
     typeof name !== "string" ||
     typeof room !== "string" ||
@@ -70,7 +73,8 @@ export async function handleJoinRoom(
     isHost = roomData.players.length === 0;
     roomData.players.push({
       id: socket.id,
-      name,
+      name: userName,
+      avatar: userAvatar,
       playerId,
       isHost,
       alive: true,
@@ -102,6 +106,7 @@ export async function handleJoinRoom(
   // 8. Шлём обновлённое состояние всем в комнате
   const publicPlayers = roomData.players.map(p => ({
     name:     p.name,
+    avatar:   p.avatar,
     playerId: p.playerId,
     isHost:   p.isHost,
     alive:    p.alive,
