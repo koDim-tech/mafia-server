@@ -22,7 +22,7 @@ export async function handleDayVote(socket, io, client, { targetId }) {
     roomData.dayVotes = roomData.dayVotes || {};
     if (roomData.dayVotes[playerId]) {
       return [roomData, async () => {
-        socket.emit("errorMessage", { text: "Вы уже голосовали!" });
+        socket.emit("errorMessage", {code: "ALREADY_VOTED", text: "Вы уже голосовали!" });
       }];
     }
     roomData.dayVotes[playerId] = targetId;

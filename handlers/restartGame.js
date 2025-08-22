@@ -9,21 +9,34 @@ export async function handleRestartGame(socket, io, client) {
   let roomData = raw ? JSON.parse(raw) : null;
   if (!roomData) return;
 
-  // Сброс на lobby, но все остаются в комнате!
+  // Сброс на lobby, но все остаются в комнате
   roomData.phase = "lobby";
   roomData.gameOverTimeoutActive = false;
+  roomData.gameStarted = false;
+
+  // Сброс статусов игроков
   roomData.players.forEach(p => {
-    p.role = null;
+    p.role  = null;
     p.alive = true;
     p.ready = false;
   });
-  roomData.dayVotes = {};
-  roomData.nightVotes = {};
-  roomData.lastKilled = null;
 
-  await client.del(`chat:${room}`); // очищаем чат!
+  // 💧 Полный сброс состояний дня/ночи и служебных флагов
+  roomData.dayVotes          = {};
+  roomData.nightVotes        = {};
+  roomData.victimId          = null;
+  roomData.doctorChoice      = null;
+  roomData.doctorVoted       = false;
+  roomData.lastKilled        = null;
+  roomData.lastSaved         = null;
+  roomData.lastDoctorSavedId = null;
+
+  // (опционально) очистка истории чата
+  await client.del(`chat:${room}`);
+
   await client.set(`room:${room}`, JSON.stringify(roomData));
-  sendRoomState(io, room, roomData);
 
-  io.to(room).emit('gameRestarted'); // можно ловить на клиенте для сброса UI
+  // Рассылаем обновлённое состояние
+  sendRoomState(io, room, roomData);
+  io.to(room).emit("gameRestarted"); // клиент может дополнительно обнулять локальные стейты/UI
 }

@@ -22,3 +22,7 @@ export function countVotes(votes, options = {}) {
   if (isTie && !options.allowTie) return { victimId: null, votes: tally, isTie: true };
   return { victimId: first[0], votes: tally, isTie: false };
 }
+
+export function emitVoteStatus(socket, phase, voted, targetId = null) {
+  socket.emit("voteStatus", { phase, voted, targetId });
+}

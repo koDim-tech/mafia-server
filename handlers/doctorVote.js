@@ -1,12 +1,9 @@
+// handlers/doctorVote.js
 import { PHASES, ROLES } from "../constants.js";
-import { emitSystemMessage, sleep } from "../utils/chatUtils.js";
-import { getLivingMafia, getPlayer } from "../utils/players.js";
+import { emitSystemMessage } from "../utils/chatUtils.js";
+import { getPlayer } from "../utils/players.js";
 import { withRedisTransaction } from "../utils/withRedisTransaction.js";
-import { countVotes } from "../utils/votes.js";
-
-import { PHASE_DISCUSSION_MS } from "../gameSettings.js";
 import { checkWinCondition } from "../services/checkWinCondition.js";
-
 
 export async function handleDoctorVote(socket, io, client, { targetId }) {
   const { room, playerId } = socket.data;
@@ -17,51 +14,83 @@ export async function handleDoctorVote(socket, io, client, { targetId }) {
   await withRedisTransaction(client, roomKey, async (roomData) => {
     if (!roomData || roomData.phase !== PHASES.NIGHT_DOCTOR) return [roomData];
 
-    const voter = getPlayer(roomData.players, playerId);
-    if (!voter || !voter.alive || voter.role !== ROLES.DOCTOR) return [roomData];
+    const doctor = getPlayer(roomData.players, playerId);
+    if (!doctor || !doctor.alive || doctor.role !== ROLES.DOCTOR) return [roomData];
 
-    // Сохраняем выбор доктора
-    roomData.doctorChoice = targetId;
-
-    // --- Проверяем исход ночи ---
-    let victim = roomData.victimId && roomData.players.find((p) => p.playerId === roomData.victimId);
-    let doctorSaved = false;
-    if (
-      victim &&
-      victim.alive &&
-      roomData.doctorChoice === roomData.victimId
-    ) {
-      doctorSaved = true; // жертва спасена
-      // victim.alive не меняем
-    } else if (victim && victim.alive) {
-      victim.alive = false;
-      roomData.lastKilled = victim.name;
+    // Защита от повторного клика в ту же ночь
+    if (roomData.doctorVoted) {
+      return [roomData, async () => socket.emit("errorMessage", {code: "ALREADY_VOTED", text: "Вы уже сделали выбор этой ночью." })];
     }
 
-    // Проверка победы (это может установить phase = gameOver)
-    let win = await checkWinCondition(io, client, room, roomData);
+    // --- НОВОЕ: правило «не дважды подряд» ---
+    const lastDoctorSavedId = roomData.lastDoctorSavedId || null;
+    if (targetId && lastDoctorSavedId && targetId === lastDoctorSavedId) {
+      // Не принимаем такой выбор, ночь не завершаем
+      return [roomData, async () => socket.emit("errorMessage", { text: "Нельзя спасать одного и того же игрока две ночи подряд. Выберите другого." })];
+    }
+
+    // Валидируем цель: спасать можно только живого игрока; иначе трактуем как «никого не спасать»
+    const target =
+      targetId && roomData.players.find((p) => p.playerId === targetId && p.alive)
+        ? targetId
+        : null;
+
+    roomData.doctorChoice = target;
+    roomData.doctorVoted  = true;
+
+    const victimId = roomData.victimId || null;
+    let victim = victimId ? roomData.players.find((p) => p.playerId === victimId) : null;
+
+    let doctorSaved = false;
+    let someoneDied = false;
+
+    if (!victimId || !victim || !victim.alive) {
+      // Тихая ночь — мафия не выбрала/ничья или жертва неактуальна
+      doctorSaved = false;
+      someoneDied = false;
+    } else if (target && target === victimId) {
+      // Спасение состоялось
+      doctorSaved = true;
+      someoneDied = false;
+      roomData.lastSaved  = victim.name;
+      roomData.lastKilled = null;
+    } else {
+      // Жертва не спасена
+      victim.alive = false;
+      someoneDied  = true;
+      roomData.lastKilled = victim.name;
+      roomData.lastSaved  = null;
+    }
+
+    // --- НОВОЕ: запоминаем, кого доктор спасал этой ночью (для запрета в следующую) ---
+    // Важно: правило обычно относится к выбору доктора, а не к факту покушения.
+    roomData.lastDoctorSavedId = target; // если target === null, разрешим в следующую ночь спасать любого
+
+    // Проверяем победу после фактической смерти
+    const win = await checkWinCondition(io, client, room, roomData);
     if (win) {
-      // Победа, ничего больше не делаем!
       return [roomData, async () => {}];
     }
 
-    // Если нет победителя, переводим в день
+    // День
     roomData.phase = PHASES.DAY;
 
-    // Чистим временные поля ночи
-    roomData.victimId = null;
-    roomData.doctorChoice = null;
+    // Чистим ночные временные поля
+    roomData.victimId      = null;
+    roomData.doctorChoice  = null;
+    roomData.doctorVoted   = false; // сброс флага на будущую ночь
 
     const afterCommit = async () => {
-      // Всё, что ниже, выполняется только если нет победителя!
-      if (victim && victim.alive === false && !doctorSaved) {
-        await emitSystemMessage(io, client, room, `Наступает утро... На асфальте виднеются следы крови...`, { delay: 1000 });
-        await emitSystemMessage(io, client, room, `К сожалению, игрок ${victim.name} был убит этой ночью!`, { delay: 2000 });
+      if (!victimId || !victim) {
+        await emitSystemMessage(io, client, room, "Наступает утро... Ночь прошла спокойно.");
+      } else if (doctorSaved) {
+        await emitSystemMessage(io, client, room, "Наступает утро... К счастью, сегодня никто не умер.");
+        await emitSystemMessage(io, client, room, `Доктор спас ${victim.name}!`);
+      } else if (someoneDied) {
+        await emitSystemMessage(io, client, room, "Наступает утро... На асфальте виднеются следы крови...");
+        await emitSystemMessage(io, client, room, `К сожалению, ${victim.name} был убит этой ночью.`);
       }
-      if (doctorSaved && victim) {
-        await emitSystemMessage(io, client, room, `Наступает утро... К счастью, сегодня никто не умер.`, { delay: 1000 });
-        await emitSystemMessage(io, client, room, `Доктор этой ночью спас ${victim.name}!`, { delay: 2000 });
-      }
+
       await emitSystemMessage(io, client, room, "Самое время обсудить итоги этой ночи...");
 
       io.to(room).emit("phaseChanged", {

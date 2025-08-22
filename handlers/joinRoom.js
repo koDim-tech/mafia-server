@@ -3,8 +3,8 @@ import { emitSystemMessage } from "../utils/chatUtils.js";
 import { validate as uuidValidate } from "uuid";
 
 // Валидаторы
-const ROOM_ID_RE       = /^[\w-]{3,30}$/;             // a-zA-Z0-9_-
-const PLAYER_NAME_RE   = /^[\p{L}0-9 _\-@]{1,20}$/u;   // буквы, цифры, пробел, _-@
+const ROOM_ID_RE = /^[\w-]{3,30}$/; // a-zA-Z0-9_-
+const PLAYER_NAME_RE = /^[\p{L}0-9 _\-@]{1,20}$/u; // буквы, цифры, пробел, _-@
 const MAX_PASSWORD_LEN = 30;
 
 function buildUserNameFromUser(user) {
@@ -71,7 +71,7 @@ export async function handleJoinRoom(
   }
 
   // Ищем игрока по playerId — это ключевой идентификатор для реконнекта
-  let existing = roomData.players.find(p => p.playerId === playerId);
+  let existing = roomData.players.find((p) => p.playerId === playerId);
 
   // Если НЕ существующий игрок и игра уже не в лобби — не впускаем
   if (!existing && roomData.phase !== "lobby") {
@@ -131,48 +131,78 @@ export async function handleJoinRoom(
   socket.data = { room, playerId };
 
   // Публичные данные игроков
-  const publicPlayers = roomData.players.map(p => ({
-    name:     p.name,
-    avatar:   p.avatar,
+  const publicPlayers = roomData.players.map((p) => ({
+    name: p.name,
+    avatar: p.avatar,
     playerId: p.playerId,
-    isHost:   p.isHost,
-    alive:    p.alive,
-    ready:    !!p.ready,
+    isHost: p.isHost,
+    alive: p.alive,
+    ready: !!p.ready,
   }));
 
   // Отправляем состояние
   io.to(room).emit("roomData", {
-    players:    publicPlayers,
-    phase:      roomData.phase,
+    players: publicPlayers,
+    phase: roomData.phase,
     maxPlayers: roomData.maxPlayers,
   });
 
   socket.emit("roomJoined", {
-    players:     publicPlayers,
+    players: publicPlayers,
     gameStarted: roomData.phase !== "lobby",
-    maxPlayers:  roomData.maxPlayers,
+    maxPlayers: roomData.maxPlayers,
   });
 
-  // Если игра уже идёт — синхронизируем статусы для вошедшего
-  if (roomData.phase !== "lobby") {
-    const me = roomData.players.find(p => p.playerId === playerId);
-    if (me?.role)    socket.emit("roleAssigned", { role: me.role });
-    if (!me?.alive)  socket.emit("playerKilled", playerId);
-    io.to(room).emit("phaseChanged", {
-      phase:      roomData.phase,
-      maxPlayers: roomData.maxPlayers,
-      players:    publicPlayers,
+if (roomData.phase !== "lobby") {
+  const me = roomData.players.find(p => p.playerId === playerId);
+
+  if (me?.role) {
+    socket.emit("roleAssigned", { role: me.role });
+  }
+
+  if (!me?.alive) {
+    socket.emit("playerKilled", playerId);
+  }
+
+  // 👇 добавляем информацию о голосах
+  if (roomData.dayVotes?.[playerId]) {
+    socket.emit("voteStatus", {
+      phase: "day",
+      voted: true,
+      targetId: roomData.dayVotes[playerId],
     });
   }
+  if (roomData.nightVotes?.[playerId]) {
+    socket.emit("voteStatus", {
+      phase: "night",
+      voted: true,
+      targetId: roomData.nightVotes[playerId],
+    });
+  }
+
+  io.to(room).emit("phaseChanged", {
+    phase:      roomData.phase,
+    maxPlayers: roomData.maxPlayers,
+    players:    publicPlayers,
+  });
+}
 
   // Чат-история
   const historyKey = `chat:${room}`;
   const stored = await client.lRange(historyKey, 0, -1);
-  socket.emit("chatHistory", stored.map(m => JSON.parse(m)));
+  socket.emit(
+    "chatHistory",
+    stored.map((m) => JSON.parse(m))
+  );
 
   // Приветствие — только в лобби и только при новом входе
   if (roomData.phase === "lobby" && !existing) {
-    await emitSystemMessage(io, client, room, `${userNameForNew} присоединился к комнате.`);
+    await emitSystemMessage(
+      io,
+      client,
+      room,
+      `${userNameForNew} присоединился к комнате.`
+    );
   }
 
   socket.emit("welcome", { playerId, isHost });

@@ -23,7 +23,7 @@ export async function handleMafiaVote(socket, io, client, { targetId }) {
     roomData.nightVotes = roomData.nightVotes || {};
     if (roomData.nightVotes[playerId]) {
       return [roomData, async () => {
-        socket.emit("errorMessage", { text: "Вы уже голосовали!" });
+        socket.emit("errorMessage", { code: "ALREADY_VOTED", text: "Вы уже голосовали!" });
       }];
     }
     roomData.nightVotes[playerId] = targetId;
