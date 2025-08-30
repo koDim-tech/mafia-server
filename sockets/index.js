@@ -14,6 +14,7 @@ import { handleSetReady }      from "../handlers/setReady.js";
 import { handleRestartGame }   from "../handlers/restartGame.js";
 import { handleGetLobbies }    from "../handlers/getLobbies.js";
 import { handleDisconnect }    from "../handlers/disconnect.js";
+import { startDeadlineTicker } from "../services/deadlineTicker.js";
 
 export function registerSocketHandlers(server) {
   const io = new Server(server, {
@@ -54,6 +55,6 @@ export function registerSocketHandlers(server) {
       }
     });
   });
-
+   startDeadlineTicker(io, client); 
   console.log("Socket.io handlers registered");
 }

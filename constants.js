@@ -4,6 +4,7 @@ export const PHASES = {
   NIGHT_DOCTOR: 'night-doctor',
   DAY: 'day',
   END: 'end',
+  PRE_GAME: "preGame",
 };
 
 

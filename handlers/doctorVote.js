@@ -4,6 +4,8 @@ import { emitSystemMessage } from "../utils/chatUtils.js";
 import { getPlayer } from "../utils/players.js";
 import { withRedisTransaction } from "../utils/withRedisTransaction.js";
 import { checkWinCondition } from "../services/checkWinCondition.js";
+import assertVoteWindowOrError from "../services/checkCanVote.js";
+import { persistDeadline, setDayTimers } from "../services/timers.js";
 
 export async function handleDoctorVote(socket, io, client, { targetId }) {
   const { room, playerId } = socket.data;
@@ -16,6 +18,8 @@ export async function handleDoctorVote(socket, io, client, { targetId }) {
 
     const doctor = getPlayer(roomData.players, playerId);
     if (!doctor || !doctor.alive || doctor.role !== ROLES.DOCTOR) return [roomData];
+
+    if (!assertVoteWindowOrError(socket, roomData, "doctor")) return [roomData];
 
     // Защита от повторного клика в ту же ночь
     if (roomData.doctorVoted) {
@@ -80,6 +84,10 @@ export async function handleDoctorVote(socket, io, client, { targetId }) {
     roomData.doctorChoice  = null;
     roomData.doctorVoted   = false; // сброс флага на будущую ночь
 
+
+    setDayTimers(roomData); 
+    await persistDeadline(client, room, roomData);
+
     const afterCommit = async () => {
       if (!victimId || !victim) {
         await emitSystemMessage(io, client, room, "Наступает утро... Ночь прошла спокойно.");
@@ -95,6 +103,7 @@ export async function handleDoctorVote(socket, io, client, { targetId }) {
 
       io.to(room).emit("phaseChanged", {
         phase: roomData.phase,
+         timers: roomData.timers,
         players: roomData.players.map((p) => ({
           name: p.name,
           playerId: p.playerId,

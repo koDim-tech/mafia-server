@@ -1,6 +1,8 @@
 import { PHASES } from "../constants.js";
 import { assignRoles } from "../services/assingRoles.js";
+import { persistDeadline, setNightMafiaTimers, setPreGameTimers } from "../services/timers.js";
 import { emitSystemMessage, sleep } from "../utils/chatUtils.js";
+
 
 
 export async function handleStartGame(socket, io, client) {
@@ -34,14 +36,19 @@ export async function handleStartGame(socket, io, client) {
   const shuffled = assignRoles(roomData.players);
 
   roomData.players = shuffled;
-  roomData.phase = PHASES.NIGHT_MAFIA;
+  roomData.phase = PHASES.PRE_GAME;
   roomData.dayVotes = {};
   roomData.nightVotes = {};
   roomData.doctorChoice = null;
   roomData.lastKilled = null;
   roomData.messages = [];
 
+
+  setPreGameTimers(roomData)
+
+
   await client.set(`room:${room}`, JSON.stringify(roomData));
+  await persistDeadline(client, room, roomData); 
 
   // 2. Сразу отправляем роли и фазу всем игрокам
   for (const player of roomData.players) {
@@ -50,6 +57,7 @@ export async function handleStartGame(socket, io, client) {
 
   io.to(room).emit("phaseChanged", {
     phase: roomData.phase,
+    timers: roomData.timers,
     players: roomData.players.map((p) => ({
       name: p.name,
       playerId: p.playerId,

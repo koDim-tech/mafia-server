@@ -179,9 +179,18 @@ if (roomData.phase !== "lobby") {
       targetId: roomData.nightVotes[playerId],
     });
   }
+  if (roomData.voteWindow) {
+  socket.emit("votingWindow", {
+    stage: roomData.voteWindow.stage,
+    openAt: roomData.voteWindow.openAt,
+    endsAt: roomData.voteWindow.endsAt,
+    audience: roomData.voteWindow.audience,
+  });
+}
 
   io.to(room).emit("phaseChanged", {
     phase:      roomData.phase,
+    timers: roomData.timers || null,
     maxPlayers: roomData.maxPlayers,
     players:    publicPlayers,
   });

@@ -17,7 +17,7 @@ export async function handleGetLobbies(socket, io, client) {
       } catch { continue; }
 
       
-      if (data.phase !== "lobby") continue;
+      if (data?.phase !== "lobby") continue;
       if (!data.players || data.players.length === 0) continue;
 
       lobbies.push({

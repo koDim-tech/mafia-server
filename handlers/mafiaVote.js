@@ -4,8 +4,8 @@ import { getLivingMafia, getPlayer } from "../utils/players.js";
 import { withRedisTransaction } from "../utils/withRedisTransaction.js";
 import { countVotes } from "../utils/votes.js";
 import { checkWinCondition } from "../services/checkWinCondition.js";
-
-
+import assertVoteWindowOrError from "../services/checkCanVote.js";
+import { persistDeadline, setDayTimers, setNightDoctorTimers } from "../services/timers.js";
 
 export async function handleMafiaVote(socket, io, client, { targetId }) {
   console.log("Mafia vote request from", socket.id);
@@ -19,6 +19,8 @@ export async function handleMafiaVote(socket, io, client, { targetId }) {
 
     const voter = getPlayer(roomData.players, playerId);
     if (!voter || !voter.alive || voter.role !== ROLES.MAFIA) return [roomData];
+
+    if (!assertVoteWindowOrError(socket, roomData, "mafia")) return [roomData];
 
     roomData.nightVotes = roomData.nightVotes || {};
     if (roomData.nightVotes[playerId]) {
@@ -38,33 +40,36 @@ export async function handleMafiaVote(socket, io, client, { targetId }) {
     }
 
     // --- Все мафии проголосовали ---
-    const { victimId } = countVotes(roomData.nightVotes, { allowTie: false });
-    roomData.victimId = victimId;     // понадобится доктору
-    roomData.nightVotes = {};         // очистка для следующей подсцены
+      const { victimId } = countVotes(roomData.nightVotes, { allowTie: false });
+  roomData.victimId = victimId;
+  roomData.nightVotes = {};
 
-    const hasAliveDoctor = roomData.players.some(p => p.role === ROLES.DOCTOR && p.alive);
+  const hasAliveDoctor = roomData.players.some(p => p.role === ROLES.DOCTOR && p.alive);
 
-    if (hasAliveDoctor) {
-      // Переходим к фазе доктора
-      roomData.phase = PHASES.NIGHT_DOCTOR;
+  if (hasAliveDoctor) {
+    // Сначала переключаем фазу
+    roomData.phase = PHASES.NIGHT_DOCTOR;
+    // ⬇️ затем — таймер окна доктора и сразу сохраняем
+    setNightDoctorTimers(roomData);
+    await persistDeadline(client, room, roomData);
 
-      const afterCommit = async () => {
-        await emitSystemMessage(io, client, room, "Мафия сделала свой выбор.", { delay: 1000 });
-        await emitSystemMessage(io, client, room, "Просыпается доктор. Он должен выбрать, кого спасти этой ночью.", { delay: 1000 });
+    const afterCommit = async () => {
+      await emitSystemMessage(io, client, room, "Мафия сделала свой выбор.", { delay: 1000 });
+      await emitSystemMessage(io, client, room, "Просыпается доктор. Он должен выбрать, кого спасти этой ночью.", { delay: 1000 });
 
-        io.to(room).emit("phaseChanged", {
-          phase: roomData.phase,
-          players: roomData.players.map(p => ({
-            name: p.name,
-            playerId: p.playerId,
-            isHost: p.isHost,
-            alive: p.alive,
-          })),
-        });
-      };
-
-      return [roomData, afterCommit];
-    }
+      io.to(room).emit("phaseChanged", {
+        phase: roomData.phase,
+        timers: roomData.timers,
+        players: roomData.players.map(p => ({
+          name: p.name,
+          playerId: p.playerId,
+          isHost: p.isHost,
+          alive: p.alive,
+        })),
+      });
+    };
+    return [roomData, afterCommit];
+  }
 
     // Доктора нет: сразу применяем убийство и утро
     if (roomData.victimId) {
@@ -80,6 +85,7 @@ export async function handleMafiaVote(socket, io, client, { targetId }) {
     }
 
     roomData.phase = PHASES.DAY;
+    setDayTimers(roomData);
 
     const afterCommit = async () => {
       await emitSystemMessage(io, client, room, "Мафия сделала свой выбор.", { delay: 800 });
@@ -87,6 +93,7 @@ export async function handleMafiaVote(socket, io, client, { targetId }) {
 
       io.to(room).emit("phaseChanged", {
         phase: roomData.phase,
+        timers: roomData.timers,
         players: roomData.players.map(p => ({
           name: p.name,
           playerId: p.playerId,
@@ -94,11 +101,9 @@ export async function handleMafiaVote(socket, io, client, { targetId }) {
           alive: p.alive,
         })),
       });
+      // (по желанию можно здесь persistDeadline, но ты просил ничего не добавлять сверх необходимого)
     };
 
     return [roomData, afterCommit];
   });
 }
-
-
-
