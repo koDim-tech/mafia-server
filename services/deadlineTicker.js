@@ -7,6 +7,7 @@ import { checkWinCondition } from "../services/checkWinCondition.js";
 import { emitSystemMessage } from "../utils/chatUtils.js";
 import { setNightMafiaTimers, setNightDoctorTimers, setDayTimers, persistDeadline } from "./timers.js";
 
+// ... твой startDeadlineTicker(...)
 export function startDeadlineTicker(io, client) {
   setInterval(async () => {
     const now = Date.now();
@@ -26,10 +27,16 @@ export function startDeadlineTicker(io, client) {
       await withRedisTransaction(client, roomKey, async (roomData) => {
         if (!roomData) return [roomData];
 
-        // helper
         const done = [roomData, async () => { await removeDeadline(client, member); }];
 
-         if (kind === "preGame" &&
+        // ① Универсальные АНОНСЫ (announce:<baseKind>:<sec>)
+        if (kind.startsWith("announce:")) {
+          const msgDone = await tryEmitAnnounce(io, client, roomId, roomData, kind, endsAt);
+          return done; // при любом исходе анонс удаляем
+        }
+
+        // ② Предстарт закончился → переходим к мафии
+        if (kind === "preGame" &&
             roomData.phase === PHASES.PRE_GAME &&
             roomData.timers?.preGame?.endsAt === endsAt &&
             now >= endsAt) {
@@ -37,19 +44,21 @@ export function startDeadlineTicker(io, client) {
           return done;
         }
 
+        // ③ Ночь: мафия
         if (kind === "nightMafiaVote" && roomData.phase === PHASES.NIGHT_MAFIA &&
             roomData.timers?.nightMafiaVote?.endsAt === endsAt && now >= endsAt) {
           await advanceAfterNightMafiaTimeout(io, client, roomId, roomData);
           return done;
         }
 
+        // ④ Ночь: доктор
         if (kind === "nightDoctorVote" && roomData.phase === PHASES.NIGHT_DOCTOR &&
             roomData.timers?.nightDoctorVote?.endsAt === endsAt && now >= endsAt) {
           await advanceAfterNightDoctorTimeout(io, client, roomId, roomData);
           return done;
         }
 
-        // ⬇️ новое: перевод обсуждения -> голосование
+        // ⑤ День: обсуждение → голосование
         if (kind === "dayDiscussionEnd" && roomData.phase === PHASES.DAY &&
             roomData.timers?.dayDiscussion?.endsAt === endsAt && now >= endsAt) {
           if (roomData.dayStage !== "voting") {
@@ -65,34 +74,92 @@ export function startDeadlineTicker(io, client) {
           return done;
         }
 
+        // ⑥ День: окончание голосования
         if (kind === "dayVote" && roomData.phase === PHASES.DAY &&
             roomData.timers?.dayVote?.endsAt === endsAt && now >= endsAt) {
           await advanceAfterDayVoteTimeout(io, client, roomId, roomData);
           return done;
         }
 
-        return done; // неактуально — просто убираем
+        // неактуально — убрать
+        return done;
       });
     }
   }, 1000);
 }
 
-async function advanceAfterPreGameTimeout(io, client, room, roomData) {
-  // На всякий случай: если к этому моменту игроков стало < минимального — можно вернуть в лобби
-  // if ((roomData.players.filter(p => p.alive)).length < 4) { ... }
+/** Универсальная обработка announce:<baseKind>:<sec> */
+async function tryEmitAnnounce(io, client, roomId, roomData, kind, announceEndsAt) {
+  // kind = "announce:dayVote:5"
+  const [, baseKind, secStr] = kind.split(":");
+  const s = Number(secStr) || 0;
+  const t = roomData.timers || {};
 
-  roomData.phase = PHASES.NIGHT_MAFIA;
-  setNightMafiaTimers(roomData);
+  // Проверка актуальности (фаза/стадия + совпадение endsAt - s)
+  const is = (timerKey, { phase, dayStage }) => {
+    const timer = t[timerKey];
+    if (!timer) return false;
+    if (timer.endsAt - s * 1000 !== announceEndsAt) return false;
+    if (phase && roomData.phase !== phase) return false;
+    if (typeof dayStage !== "undefined" && roomData.dayStage !== dayStage) return false;
+    return true;
+  };
 
-  await emitSystemMessage(io, client, room, "Игра началась. Город засыпает. Просыпается мафия.");
-  io.to(room).emit("phaseChanged", {
-    phase: roomData.phase,
-    timers: roomData.timers,
-    players: pubPlayers(roomData),
-  });
-  await persistDeadline(client, room, roomData);
+  let ok = false;
+  let text = "";
+
+  switch (baseKind) {
+    case "preGame":
+      ok = is("preGame", { phase: PHASES.PRE_GAME });
+      text = `Игра начнётся через ${s} сек.`;
+      break;
+
+    case "nightMafiaVote":
+      ok = is("nightMafiaVote", { phase: PHASES.NIGHT_MAFIA });
+      text = `Ход мафии завершится через ${s} сек.`;
+      break;
+
+    case "nightDoctorVote":
+      ok = is("nightDoctorVote", { phase: PHASES.NIGHT_DOCTOR });
+      text = `Ход доктора завершится через ${s} сек.`;
+      break;
+
+    case "dayDiscussion":
+      ok = is("dayDiscussion", { phase: PHASES.DAY, dayStage: "discussion" });
+      text = `Обсуждение завершится через ${s} сек.`;
+      break;
+
+    case "dayVote":
+      ok = is("dayVote", { phase: PHASES.DAY, dayStage: "voting" });
+      text = `Голосование завершится через ${s} сек.`;
+      break;
+
+    case "toLobby":
+    ok =
+      is("toLobby", { phase: PHASES.POST_GAME }) ||
+      is("toLobby", { phase: PHASES.GAME_OVER }); // если ещё не переключился на POST_GAME
+      text = `Возврат в лобби через ${s} сек.`;
+      break;
+
+    default:
+      ok = false;
+  }
+
+  if (ok && s > 0) {
+    await emitSystemMessage(io, client, roomId, text);
+    return true;
+  }
+  return false;
 }
 
+// ── уже существующие обработчики (оставь как есть) ──
+async function advanceAfterPreGameTimeout(io, client, room, roomData) {
+  roomData.phase = PHASES.NIGHT_MAFIA;
+  setNightMafiaTimers(roomData);
+  await emitSystemMessage(io, client, room, "Игра началась. Город засыпает. Просыпается мафия.");
+  io.to(room).emit("phaseChanged", { phase: roomData.phase, timers: roomData.timers, players: pubPlayers(roomData) });
+  await persistDeadline(client, room, roomData);
+}
 
 async function advanceAfterNightMafiaTimeout(io, client, room, roomData) {
   const { victimId } = countVotes(roomData.nightVotes || {}, { allowTie: false });

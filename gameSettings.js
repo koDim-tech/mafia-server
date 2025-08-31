@@ -5,5 +5,6 @@ export const NIGHT_MAFIA_VOTE_MS = parseInt(process.env.NIGHT_MAFIA_VOTE_MS, 10)
 export const NIGHT_DOCTOR_VOTE_MS = parseInt(process.env.NIGHT_DOCTOR_VOTE_MS, 10) || 20000;
 export const DAY_DISCUSSION_MS = parseInt(process.env.DAY_DISCUSSION_MS, 10) || 40000;
 export const DAY_VOTE_MS = parseInt(process.env.DAY_VOTE_MS, 10)| 30000;
+export const POST_GAME_TO_LOBBY_MS = parseInt(process.env.POST_GAME_TO_LOBBY_MS, 10) || 30000;
 
 

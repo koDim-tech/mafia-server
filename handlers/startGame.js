@@ -22,6 +22,7 @@ export async function handleStartGame(socket, io, client) {
     return;
   }
 
+  if (roomData?.timers?.toLobby) delete roomData.timers.toLobby;
   const allReady =
     roomData.players.length >= 1 && roomData.players.every((p) => p.ready);
 
@@ -69,7 +70,7 @@ export async function handleStartGame(socket, io, client) {
   // 3. Теперь сообщения с задержкой (только для атмосферы)
   await emitSystemMessage(io, client, room, "Добро пожаловать в игру! Пожалуйста, ознакомьтесь с вашими ролями.", { delay: 3000 });
  /*  await sleep(4000) */;
-  await emitSystemMessage(io, client, room, "Игра началась! Будьте внимательны и осторожны.", { delay: 2000 });
+  /* await emitSystemMessage(io, client, room, "Игра началась! Будьте внимательны и осторожны.", { delay: 2000 }); */
  /*  await sleep(2500); */
-  await emitSystemMessage(io, client, room, "Первая ночь наступает. Мафия, сделайте свой ход.", { delay: 2000 });
+/*   await emitSystemMessage(io, client, room, "Первая ночь наступает. Мафия, сделайте свой ход.", { delay: 2000 }); */
 }
