@@ -69,6 +69,7 @@ export function startDeadlineTicker(io, client) {
               timers: roomData.timers,
               dayStage: roomData.dayStage,
               players: pubPlayers(roomData),
+              
             });
           }
           return done;
